@@ -1,0 +1,10 @@
+{
+  "name": "lahja-voice",
+  "version": "0.1.0",
+  "description": "Turn a spoken-word script (for example the voiceover files linted by the lahja plugin) into mp3 audio with the ElevenLabs text-to-speech API. Dry run by default: nothing is sent, and the key is never read, until you explicitly ask.",
+  "license": "MIT",
+  "homepage": "https://github.com/msamkari/lahja-voice",
+  "repository": "https://github.com/msamkari/lahja-voice",
+  "keywords": ["voiceover", "text-to-speech", "elevenlabs", "arabic", "script"],
+  "author": { "name": "Mohammad Samkari", "url": "https://github.com/msamkari" }
+}
