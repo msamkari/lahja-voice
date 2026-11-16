@@ -99,7 +99,7 @@ TAGGED = "[narrator] Hello there.\n[calm] Second line.\n# Heading\nplain note\n"
 class DryRun(Base):
     def test_default_is_dry_run(self):
         p = self.script(TAGGED)
-        code, out, err = self.run_main([p, "--voice-id", "voiceABC", "--out", self.fresh_out()])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "voiceABC", "--out", self.fresh_out()])
         self.assertEqual(code, 0)
         self.assertIn("nothing was sent", out)
         self.assertIn("billed by characters according to your ElevenLabs plan", out)
@@ -112,32 +112,32 @@ class DryRun(Base):
         with mock.patch.object(socket, "socket", boom), \
                 mock.patch.object(socket, "create_connection", boom), \
                 mock.patch.object(socket, "getaddrinfo", boom):
-            code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out()])
+            code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()])
         self.assertEqual(code, 0, err)
 
     def test_dry_run_never_reads_key(self):
         p = self.script(TAGGED)
         with mock.patch.object(lv, "read_key", side_effect=AssertionError("key read")):
-            code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out()],
+            code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()],
                                            env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 0, err)
 
     def test_dry_run_does_not_create_out(self):
         p = self.script(TAGGED)
         o = self.fresh_out()
-        self.run_main([p, "--voice-id", "v1", "--out", o])
+        self.run_main(["dry", p, "--voice-id", "v1", "--out", o])
         self.assertFalse(os.path.exists(o))
 
     def test_dry_run_with_key_set_does_not_print_it(self):
         p = self.script(TAGGED)
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out()],
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertNotIn(KEY, out + err)
 
     def test_dry_run_reports_counts_voice_model_destination(self):
         p = self.script(TAGGED)
         o = self.fresh_out().replace("\\", "/")
-        code, out, err = self.run_main([p, "--voice-id", "voiceABC", "--out", o])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "voiceABC", "--out", o])
         self.assertIn("spoken lines: 2", out)
         self.assertIn("characters: %d" % (len("Hello there.") + len("Second line.")), out)
         self.assertIn("voice id: voiceABC", out)
@@ -146,21 +146,21 @@ class DryRun(Base):
 
     def test_preview_is_80_chars(self):
         p = self.script("[a] " + "x" * 200 + "\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out()])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()])
         line = [l for l in out.splitlines() if l.startswith("001 ")][0]
         self.assertIn("x" * 80 + "...", line)
         self.assertNotIn("x" * 81, line)
 
     def test_custom_model_shown(self):
         p = self.script(TAGGED)
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--model", "eleven_v3",
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--model", "eleven_v3",
                                         "--out", self.fresh_out()])
         self.assertIn("model: eleven_v3", out)
 
     def test_single_mp3_destination(self):
         p = self.script("[a] one line\n")
         o = (self.fresh_out() + ".mp3").replace("\\", "/")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", o])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", o])
         self.assertEqual(code, 0, err)
         self.assertIn("destination file: " + o, out)
 
@@ -170,14 +170,14 @@ class Send(Base):
         srv = start_server()
         self.addCleanup(stop, srv)
         p = self.script(TAGGED)
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--api-base", base_of(srv),
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--api-base", base_of(srv),
                                         "--out", self.fresh_out()], env={lv.KEY_ENV: KEY})
         self.assertEqual(srv.requests, [])
 
     def test_send_missing_key_exit_1(self):
         p = self.script(TAGGED)
         o = self.fresh_out()
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send", "--out", o])
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--out", o])
         self.assertEqual(code, 1)
         self.assertIn(lv.KEY_ENV, err)
         self.assertIn("README", err)
@@ -188,8 +188,7 @@ class Send(Base):
         self.addCleanup(stop, srv)
         p = self.script(TAGGED)
         o = self.fresh_out()
-        code, out, err = self.run_main([p, "--voice-id", "voiceABC", "--send",
-                                        "--api-base", base_of(srv), "--out", o],
+        code, out, err = self.run_main(["send", p, "--voice-id", "voiceABC", "--api-base", base_of(srv), "--out", o],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 0, err)
         self.assertEqual(sorted(os.listdir(o)), ["line_001.mp3", "line_002.mp3"])
@@ -201,8 +200,7 @@ class Send(Base):
         srv = start_server()
         self.addCleanup(stop, srv)
         p = self.script("[a] Hello\n")
-        self.run_main([p, "--voice-id", "voiceABC", "--model", "m1", "--send",
-                       "--api-base", base_of(srv), "--out", self.fresh_out()],
+        self.run_main(["send", p, "--voice-id", "voiceABC", "--model", "m1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                       env={lv.KEY_ENV: KEY})
         r = srv.requests[0]
         self.assertEqual(r["path"], "/v1/text-to-speech/voiceABC")
@@ -215,8 +213,7 @@ class Send(Base):
         self.addCleanup(stop, srv)
         p = self.script("[a] Hello\n")
         o = self.fresh_out() + ".mp3"
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", o],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", o],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 0, err)
         self.assertTrue(os.path.isfile(o))
@@ -225,8 +222,7 @@ class Send(Base):
         srv = start_server()
         self.addCleanup(stop, srv)
         p = self.script(TAGGED)
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertNotIn(KEY, out + err)
 
@@ -235,8 +231,7 @@ class Send(Base):
                             "body": b'{"detail":"unauthorized"}'})
         self.addCleanup(stop, srv)
         p = self.script(TAGGED)
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
         self.assertIn("HTTP 401", err)
@@ -247,8 +242,7 @@ class Send(Base):
         srv = start_server({"status": 401, "ctype": "text/plain", "echo_key": True})
         self.addCleanup(stop, srv)
         p = self.script(TAGGED)
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
         self.assertNotIn(KEY, out + err)
@@ -259,8 +253,7 @@ class Send(Base):
                             "body": b"oops\x1b[31m red\x07"})
         self.addCleanup(stop, srv)
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertNotIn("\x1b", err)
         self.assertNotIn("\x07", err)
@@ -269,8 +262,7 @@ class Send(Base):
         p = self.script("[a] hi\n")
         boom = OSError("connect failed for header " + KEY)
         with mock.patch.object(lv, "synthesize", side_effect=boom):
-            code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                            "--out", self.fresh_out()],
+            code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--out", self.fresh_out()],
                                            env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
         self.assertNotIn(KEY, out + err)
@@ -281,8 +273,7 @@ class Send(Base):
         p = self.script("[a] hi\n")
         err_obj = lv.urllib.error.URLError("refused " + KEY)
         with mock.patch.object(lv.urllib.request.OpenerDirector, "open", side_effect=err_obj):
-            code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                            "--api-base", base_of(srv),
+            code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv),
                                             "--out", self.fresh_out()],
                                            env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
@@ -291,8 +282,7 @@ class Send(Base):
     def test_invalid_key_value_not_echoed(self):
         bad = "has space " + KEY
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--out", self.fresh_out()], env={lv.KEY_ENV: bad})
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--out", self.fresh_out()], env={lv.KEY_ENV: bad})
         self.assertEqual(code, 1)
         self.assertNotIn(KEY, out + err)
 
@@ -301,8 +291,7 @@ class Send(Base):
         self.addCleanup(stop, srv)
         bad = KEY + "\nX-Evil: 1"
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: bad})
         self.assertEqual(code, 1)
         self.assertEqual(srv.requests, [])
@@ -314,8 +303,7 @@ class Send(Base):
         srv = start_server({"redirect": base_of(target) + "/v1/text-to-speech/v1"})
         self.addCleanup(stop, srv)
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
         self.assertIn("redirect", err)
@@ -327,8 +315,7 @@ class Send(Base):
         srv = start_server({"redirect": "http://" + EVIL_HOST + "/x"})
         self.addCleanup(stop, srv)
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
         self.assertIn("redirect", err)
@@ -338,8 +325,7 @@ class Send(Base):
         self.addCleanup(stop, srv)
         p = self.script("[a] hi\n")
         o = self.fresh_out()
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", o],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", o],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
         self.assertIn("content type", err)
@@ -349,8 +335,7 @@ class Send(Base):
         srv = start_server({"ctype": "audio/mpeg; charset=binary"})
         self.addCleanup(stop, srv)
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 0, err)
 
@@ -360,8 +345,7 @@ class Send(Base):
         p = self.script("[a] hi\n")
         o = self.fresh_out()
         with mock.patch.object(lv, "MAX_RESPONSE_BYTES", 1000):
-            code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                            "--api-base", base_of(srv), "--out", o],
+            code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", o],
                                            env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
         self.assertIn("size cap", err)
@@ -371,8 +355,7 @@ class Send(Base):
         srv = start_server({"body": b""})
         self.addCleanup(stop, srv)
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
 
@@ -389,8 +372,7 @@ class Send(Base):
                 raise lv.ToolError("API error HTTP 429")
             return real(*a, **k)
         with mock.patch.object(lv, "synthesize", flaky):
-            code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                            "--api-base", base_of(srv), "--out", self.fresh_out()],
+            code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                            env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 1)
         self.assertIn("1 file(s) were written", err)
@@ -399,8 +381,7 @@ class Send(Base):
         srv = start_server()
         self.addCleanup(stop, srv)
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY, "HTTP_PROXY": "http://127.0.0.1:9",
                                             "http_proxy": "http://127.0.0.1:9"})
         self.assertEqual(code, 0, err)
@@ -442,26 +423,25 @@ class Hosts(Base):
     def test_bad_host_exit_2_and_no_key_read(self):
         p = self.script("[a] hi\n")
         with mock.patch.object(lv, "read_key", side_effect=AssertionError("key read")):
-            code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                            "--api-base", "https://" + EVIL_HOST,
+            code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", "https://" + EVIL_HOST,
                                             "--out", self.fresh_out()], env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 2)
 
     def test_bad_host_in_dry_run_also_refused(self):
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--api-base", "https://" + EVIL_HOST])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--api-base", "https://" + EVIL_HOST])
         self.assertEqual(code, 2)
 
     def test_voice_id_path_traversal_refused(self):
         p = self.script("[a] hi\n")
         for v in ["../x", "a/b", "a?b", "a b", "", "x" * 65]:
-            code, out, err = self.run_main([p, "--voice-id", v, "--out", self.fresh_out()])
+            code, out, err = self.run_main(["dry", p, "--voice-id", v, "--out", self.fresh_out()])
             self.assertIn(code, (1, 2), v)
             self.assertNotEqual(code, 0, v)
 
     def test_model_charset_refused(self):
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--model", "a/../b"])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--model", "a/../b"])
         self.assertEqual(code, 2)
 
 
@@ -470,26 +450,25 @@ class Refusals(Base):
         srv = start_server()
         self.addCleanup(stop, srv)
         p = self.script("[a] " + "word " * 50 + "\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--max-chars", "100", "--send",
-                                        "--api-base", base_of(srv), "--out", self.fresh_out()],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--max-chars", "100", "--api-base", base_of(srv), "--out", self.fresh_out()],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 2)
         self.assertEqual(srv.requests, [])
 
     def test_cap_refused_in_dry_run(self):
         p = self.script("[a] " + "word " * 50 + "\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--max-chars", "100"])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--max-chars", "100"])
         self.assertEqual(code, 2)
         self.assertIn("max-chars", err)
 
     def test_default_cap_is_5000(self):
         p = self.script("[a] " + "a" * 5001 + "\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out()])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()])
         self.assertEqual(code, 2)
 
     def test_cap_exact_is_ok(self):
         p = self.script("[a] " + "a" * 100 + "\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--max-chars", "100",
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--max-chars", "100",
                                         "--out", self.fresh_out()])
         self.assertEqual(code, 0, err)
 
@@ -499,19 +478,19 @@ class Refusals(Base):
         os.makedirs(o)
         with open(o + "/keep.txt", "w") as f:
             f.write("x")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", o])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", o])
         self.assertEqual(code, 2)
 
     def test_existing_empty_out_ok(self):
         p = self.script("[a] hi\n")
         o = self.fresh_out()
         os.makedirs(o)
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", o])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", o])
         self.assertEqual(code, 0, err)
 
     def test_existing_file_as_out_refused(self):
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", p])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", p])
         self.assertEqual(code, 2)
 
     def test_existing_mp3_never_overwritten(self):
@@ -521,8 +500,7 @@ class Refusals(Base):
         o = self.fresh_out() + ".mp3"
         with open(o, "wb") as f:
             f.write(b"mine")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send",
-                                        "--api-base", base_of(srv), "--out", o],
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", o],
                                        env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 2)
         with open(o, "rb") as f:
@@ -531,14 +509,14 @@ class Refusals(Base):
 
     def test_mp3_out_with_many_requests_refused(self):
         p = self.script(TAGGED)
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out() + ".mp3"])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out() + ".mp3"])
         self.assertEqual(code, 2)
 
     def test_argv_key_options_refused(self):
         p = self.script("[a] hi\n")
         for opt in ["--api-key", "--api-key=" + KEY, "--apikey", "--key", "--token=" + KEY,
                     "--xi-api-key", "--secret", "--password"]:
-            code, out, err = self.run_main([p, "--voice-id", "v1", opt, KEY])
+            code, out, err = self.run_main(["dry", p, "--voice-id", "v1", opt, KEY])
             self.assertEqual(code, 2, opt)
             self.assertNotIn(KEY, out + err, opt)
             self.assertIn(lv.KEY_ENV, err)
@@ -547,34 +525,34 @@ class Refusals(Base):
         srv = start_server()
         self.addCleanup(stop, srv)
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--send", "--api-key", KEY,
+        code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-key", KEY,
                                         "--api-base", base_of(srv)], env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 2)
         self.assertEqual(srv.requests, [])
 
     def test_unknown_option_does_not_echo_value(self):
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--bogus-" + KEY])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--bogus-" + KEY])
         self.assertEqual(code, 1)
         self.assertNotIn(KEY, out + err)
 
     def test_abbreviations_not_accepted(self):
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--max", "10"])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--max", "10"])
         self.assertEqual(code, 1)
 
     def test_tagged_and_all_conflict(self):
         p = self.script("[a] hi\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--tagged-only", "--all-lines"])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--tagged-only", "--all-lines"])
         self.assertEqual(code, 1)
 
     def test_missing_script_exit_1(self):
-        code, out, err = self.run_main([self.tmp + "/nope.md", "--voice-id", "v1"])
+        code, out, err = self.run_main(["dry", self.tmp + "/nope.md", "--voice-id", "v1"])
         self.assertEqual(code, 1)
 
     def test_no_spoken_lines_exit_1(self):
         p = self.script("# only heading\nplain\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--tagged-only"])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--tagged-only"])
         self.assertEqual(code, 1)
 
 
@@ -588,7 +566,7 @@ class Text(Base):
 
     def test_arabic_in_dry_run_and_utf8_cli(self):
         p = self.script("[راوي] مرحبا بكم\n")
-        r = subprocess.run([sys.executable, "-X", "utf8", SCRIPT, p, "--voice-id", "v1",
+        r = subprocess.run([sys.executable, "-X", "utf8", SCRIPT, "dry", p, "--voice-id", "v1",
                             "--out", self.fresh_out()], capture_output=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("مرحبا بكم".encode("utf-8"), r.stdout)
@@ -603,7 +581,7 @@ class Text(Base):
 
     def test_invalid_utf8_refused(self):
         p = self.script("", raw=b"[a] \xff\xfe bad")
-        code, out, err = self.run_main([p, "--voice-id", "v1"])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1"])
         self.assertEqual(code, 1)
 
     def test_auto_prefers_tagged(self):
@@ -645,19 +623,19 @@ class Text(Base):
         srv = start_server()
         self.addCleanup(stop, srv)
         p = self.script("[a] he‮llo\x07\n")
-        self.run_main([p, "--voice-id", "v1", "--send", "--api-base", base_of(srv),
+        self.run_main(["send", p, "--voice-id", "v1", "--api-base", base_of(srv),
                        "--out", self.fresh_out()], env={lv.KEY_ENV: KEY})
         self.assertEqual(json.loads(srv.requests[0]["body"].decode("utf-8"))["text"], "hello")
 
     def test_script_text_is_data_not_options(self):
         p = self.script("[a] --send --api-base https://" + EVIL_HOST + " --voice-id x\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out()])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()])
         self.assertEqual(code, 0, err)
         self.assertIn("nothing was sent", out)
 
     def test_dry_run_preview_has_no_control_chars(self):
         p = self.script("[a] hi\x1b[2Jthere\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out()])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()])
         self.assertNotIn("\x1b", out)
 
     def test_long_line_is_split_under_limit(self):
@@ -674,7 +652,7 @@ class Text(Base):
 
     def test_long_line_makes_several_requests(self):
         p = self.script("[a] " + ("Sentence number one. " * 200) + "\n")
-        code, out, err = self.run_main([p, "--voice-id", "v1", "--out", self.fresh_out()])
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()])
         self.assertEqual(code, 0, err)
         self.assertIn("spoken lines: 1", out)
         self.assertIn("requests: 2", out)
@@ -683,14 +661,14 @@ class Text(Base):
 class Cli(Base):
     def test_subprocess_dry_run(self):
         p = self.script(TAGGED)
-        r = subprocess.run([sys.executable, SCRIPT, p, "--voice-id", "v1",
+        r = subprocess.run([sys.executable, SCRIPT, "dry", p, "--voice-id", "v1",
                             "--out", self.fresh_out()], capture_output=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn(b"nothing was sent", r.stdout)
 
     def test_subprocess_argv_key_refused_exit_2(self):
         p = self.script(TAGGED)
-        r = subprocess.run([sys.executable, SCRIPT, p, "--voice-id", "v1",
+        r = subprocess.run([sys.executable, SCRIPT, "dry", p, "--voice-id", "v1",
                             "--api-key", KEY], capture_output=True)
         self.assertEqual(r.returncode, 2)
         self.assertNotIn(KEY.encode(), r.stdout + r.stderr)
@@ -698,7 +676,7 @@ class Cli(Base):
     def test_subprocess_send_without_key_exit_1(self):
         p = self.script(TAGGED)
         env = {k: v for k, v in os.environ.items() if k != lv.KEY_ENV}
-        r = subprocess.run([sys.executable, SCRIPT, p, "--voice-id", "v1", "--send",
+        r = subprocess.run([sys.executable, SCRIPT, "send", p, "--voice-id", "v1",
                             "--out", self.fresh_out()], capture_output=True, env=env)
         self.assertEqual(r.returncode, 1)
 
@@ -717,10 +695,50 @@ class Cli(Base):
         self.assertEqual(d["license"], "MIT")
         self.assertEqual(d["version"], "0.1.0")
 
-    def test_skill_allowed_tools_exact(self):
+    def _skill(self):
         with open(ROOT + "/skills/lahja-voice/SKILL.md", encoding="utf-8") as f:
-            s = f.read()
-        self.assertIn("allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/lahja_voice.py *)", s)
+            return f.read()
+
+    def test_skill_allowed_tools_dry_only(self):
+        line = [l for l in self._skill().splitlines() if l.startswith("allowed-tools:")]
+        self.assertEqual(len(line), 1)
+        self.assertEqual(line[0].strip(),
+                         "allowed-tools: Bash(python ${CLAUDE_PLUGIN_ROOT}/scripts/lahja_voice.py dry *)")
+        self.assertIn("dry *", line[0])
+        self.assertNotIn("send", line[0])
+
+    def test_skill_text_matches_gate(self):
+        s = self._skill()
+        self.assertIn("python ${CLAUDE_PLUGIN_ROOT}/scripts/lahja_voice.py dry ", s)
+        self.assertIn("python ${CLAUDE_PLUGIN_ROOT}/scripts/lahja_voice.py send ", s)
+        self.assertIn("NOT pre-approved", s)
+        self.assertIn("permission prompt", s)
+        self.assertNotIn("--send", s)
+
+    def test_send_flag_rejected_with_clear_message(self):
+        p = self.script("[a] hi\n")
+        for mode in ("dry", "send"):
+            code, out, err = self.run_main([mode, p, "--voice-id", "v1", "--send"],
+                                           env={lv.KEY_ENV: KEY})
+            self.assertEqual(code, 1)
+            self.assertIn("use the send subcommand", err)
+
+    def test_subcommand_required(self):
+        p = self.script("[a] hi\n")
+        for argv in ([], [p, "--voice-id", "v1"], ["go", p, "--voice-id", "v1"]):
+            code, out, err = self.run_main(argv)
+            self.assertEqual(code, 1)
+            self.assertIn("subcommand", err)
+
+    def test_dry_subcommand_never_reads_key_or_network(self):
+        p = self.script("[a] hi\n")
+
+        def boom(*a, **k):
+            raise AssertionError("touched")
+        with mock.patch.object(lv, "read_key", boom), mock.patch.object(socket, "socket", boom):
+            code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()],
+                                           env={lv.KEY_ENV: KEY})
+        self.assertEqual(code, 0, err)
 
 
 if __name__ == "__main__":

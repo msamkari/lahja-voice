@@ -2,7 +2,7 @@
 """lahja-voice: turn a spoken-word script into mp3 files with the ElevenLabs
 text-to-speech REST API.
 
-Safe by default: without --send nothing is read from the environment and no
+Safe by design: with the dry subcommand nothing is read from the environment and no
 network connection is opened. Python 3.8+, standard library only.
 
 Exit codes: 0 ok, 1 tool error, 2 refusal (cap, bad host, existing output,
@@ -325,7 +325,7 @@ def synthesize(opener, base, key, voice_id, model, text):
 
 def print_dry_run(plan, voice_id, model):
     p = print
-    p("DRY RUN (nothing is sent unless you pass --send)")
+    p("DRY RUN (nothing is sent; use the send subcommand to send)")
     p("spoken lines: %d" % len(plan["lines"]))
     p("requests: %d" % len(plan["requests"]))
     p("characters: %d" % plan["chars"])
@@ -346,9 +346,17 @@ def print_dry_run(plan, voice_id, model):
 
 def run(argv):
     refuse_key_options(argv)
+    if "--send" in argv:
+        raise ToolError("there is no --send flag: use the send subcommand "
+                        "(lahja_voice.py send <script> ...)")
+    if not argv or argv[0] not in ("dry", "send"):
+        raise ToolError("first argument must be a subcommand: dry (no key, no "
+                        "network) or send (needs %s, sends the text)" % KEY_ENV)
+    sending = argv[0] == "send"
+    argv = argv[1:]
     ap = _Parser(prog="lahja_voice.py", allow_abbrev=False,
                  description="Spoken-word script to mp3 with ElevenLabs "
-                             "(dry run unless --send).")
+                             "(dry = preview only, send = call the API).")
     ap.add_argument("script")
     ap.add_argument("--voice-id", required=True)
     ap.add_argument("--model", default=DEFAULT_MODEL)
@@ -357,7 +365,6 @@ def run(argv):
     ap.add_argument("--all-lines", action="store_true")
     ap.add_argument("--tag", default=DEFAULT_TAG)
     ap.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
-    ap.add_argument("--send", action="store_true")
     ap.add_argument("--api-base", default=REAL_BASE)
     a = ap.parse_args(argv)
 
@@ -379,7 +386,7 @@ def run(argv):
     plan = build_plan(text, mode, tag_re, out, a.max_chars)
     check_out(plan)
 
-    if not a.send:
+    if not sending:
         print_dry_run(plan, a.voice_id, a.model)
         return EXIT_OK
 
