@@ -1,7 +1,7 @@
 {
   "name": "lahja-voice",
-  "version": "0.1.0",
-  "description": "Turn a spoken-word script (for example the voiceover files linted by the lahja plugin) into mp3 audio with the ElevenLabs text-to-speech API. Dry run by default: nothing is sent, and the key is never read, until you explicitly ask.",
+  "version": "0.1.1",
+  "description": "Turn a spoken-word script (for example the voiceover files linted by the lahja plugin) into mp3 audio with the ElevenLabs text-to-speech API. The dry subcommand previews without reading a key or using the network; sending is a separate subcommand.",
   "license": "MIT",
   "homepage": "https://github.com/msamkari/lahja-voice",
   "repository": "https://github.com/msamkari/lahja-voice",

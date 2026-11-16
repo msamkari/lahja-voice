@@ -8,7 +8,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import re
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -46,9 +48,22 @@ class _H(http.server.BaseHTTPRequestHandler):
             data = ("bad key " + self.headers.get("xi-api-key", "")).encode()
         self.send_response(status)
         self.send_header("Content-Type", beh.get("ctype", "audio/mpeg"))
-        self.send_header("Content-Length", str(len(data)))
+        cl = beh["cl"] if "cl" in beh else str(len(data))
+        if cl is not None:
+            self.send_header("Content-Length", cl)
+        if beh.get("chunked"):
+            self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            if beh.get("drip"):
+                for _ in range(beh["drip"]):
+                    self.wfile.write(b"I")
+                    self.wfile.flush()
+                    time.sleep(0.3)
+            else:
+                self.wfile.write(beh["raw"] if "raw" in beh else data)
+        except OSError:
+            pass
 
 
 def start_server(behavior=None):
@@ -613,7 +628,7 @@ class Text(Base):
 
     def test_control_chars_stripped(self):
         s = "[a] he\x1b[31mllo\x00 wor\x07ld\tx y"
-        self.assertEqual(self.lines(s), ["he[31mllo world x y"])
+        self.assertEqual(self.lines(s), ["he[31mllo world x"])
 
     def test_bidi_and_zero_width_stripped(self):
         s = "[a] a‮b​c⁦d⁩e﻿‏"
@@ -693,7 +708,7 @@ class Cli(Base):
             d = json.load(f)
         self.assertEqual(d["name"], "lahja-voice")
         self.assertEqual(d["license"], "MIT")
-        self.assertEqual(d["version"], "0.1.0")
+        self.assertEqual(d["version"], "0.1.1")
 
     def _skill(self):
         with open(ROOT + "/skills/lahja-voice/SKILL.md", encoding="utf-8") as f:
@@ -739,6 +754,298 @@ class Cli(Base):
             code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()],
                                            env={lv.KEY_ENV: KEY})
         self.assertEqual(code, 0, err)
+
+
+SKKEY = "sk" + "_" + "a1b2c3d4" * 3
+
+
+class Fix011(Base):
+    def send(self, srv, text="[a] hi\n", extra=(), env=None, name="o"):
+        p = self.script(text)
+        o = self.fresh_out(name)
+        argv = ["send", p, "--voice-id", "v1", "--api-base", base_of(srv), "--out", o] + list(extra)
+        code, out, err = self.run_main(argv, env=env or {lv.KEY_ENV: KEY})
+        return code, out, err, o
+
+    def serve(self, beh):
+        srv = start_server(beh)
+        self.addCleanup(stop, srv)
+        return srv
+
+    # F1
+    def test_truncated_body_is_an_error(self):
+        srv = self.serve({"cl": "1000"})
+        code, out, err, o = self.send(srv)
+        self.assertEqual(code, 1)
+        self.assertIn("incomplete", err)
+        self.assertEqual(os.listdir(o), [])
+
+    def test_truncated_chunked_body_is_an_error(self):
+        srv = self.serve({"cl": None, "chunked": True, "raw": b"40\r\n" + MP3[:10]})
+        code, out, err, o = self.send(srv)
+        self.assertEqual(code, 1)
+        self.assertEqual(os.listdir(o), [])
+
+    def test_no_length_and_not_chunked_refused(self):
+        srv = self.serve({"cl": None})
+        code, out, err, o = self.send(srv)
+        self.assertEqual(code, 1)
+        self.assertIn("completeness", err)
+        self.assertEqual(os.listdir(o), [])
+
+    def test_complete_chunked_body_ok(self):
+        raw = b"%x\r\n" % len(MP3) + MP3 + b"\r\n0\r\n\r\n"
+        srv = self.serve({"cl": None, "chunked": True, "raw": raw})
+        code, out, err, o = self.send(srv)
+        self.assertEqual(code, 0, err)
+
+    # F10
+    def test_html_labelled_audio_refused(self):
+        srv = self.serve({"body": b"<html>not audio</html>"})
+        code, out, err, o = self.send(srv)
+        self.assertEqual(code, 1)
+        self.assertIn("not MP3", err)
+        self.assertEqual(os.listdir(o), [])
+
+    def test_json_labelled_audio_refused(self):
+        srv = self.serve({"body": b'{"detail":"x"}'})
+        self.assertEqual(self.send(srv)[0], 1)
+
+    def test_mpeg_frame_sync_accepted(self):
+        srv = self.serve({"body": b"\xff\xfb\x90\x00" + b"\x00" * 40})
+        self.assertEqual(self.send(srv)[0], 0)
+
+    # F4
+    def test_failed_write_keeps_recovery_file(self):
+        srv = self.serve({})
+        rec = self.tmp + "/rec"
+        os.makedirs(rec)
+        real = lv.tempfile.mkstemp
+
+        def picky(*a, **k):
+            if k.get("dir"):
+                raise PermissionError("denied")
+            return real(*a, **k)
+        with mock.patch.object(lv.tempfile, "tempdir", rec), \
+                mock.patch.object(lv.tempfile, "mkstemp", picky):
+            code, out, err, o = self.send(srv)
+        self.assertEqual(code, 1)
+        self.assertIn("was kept in", err)
+        files = os.listdir(rec)
+        self.assertEqual(len(files), 1)
+        with open(rec + "/" + files[0], "rb") as f:
+            self.assertEqual(f.read(), MP3)
+
+    def test_no_part_files_left_after_success(self):
+        srv = self.serve({})
+        code, out, err, o = self.send(srv, TAGGED)
+        self.assertEqual(sorted(os.listdir(o)), ["line_001.mp3", "line_002.mp3"])
+
+    def test_out_names_refused_up_front(self):
+        srv = self.serve({})
+        p = self.script("[a] hi\n")
+        bad = [self.tmp + "/ts.mp3 ", self.tmp + "/td.mp3.", self.tmp + "/CON",
+               self.tmp + "/x/NUL.mp3", self.tmp + "/f.txt:x.mp3", "",
+               "//host/share/x", "\\\\host\\share\\x", self.tmp + "/a\nb",
+               self.tmp + "/a\x1bb", self.tmp + "/a\u202eb"]
+        for o in bad:
+            code, out, err = self.run_main(["send", p, "--voice-id", "v1", "--api-base",
+                                            base_of(srv), "--out", o], env={lv.KEY_ENV: KEY})
+            self.assertEqual(code, 2, repr(o))
+            self.assertNotIn("\x1b", err)
+            self.assertNotIn("host", err.replace("--out", ""))
+        self.assertEqual(srv.requests, [])
+
+    # F2 / F3 / F14
+    def test_dry_refuses_directory_and_device(self):
+        dev = "NUL" if os.name == "nt" else "/dev/null"
+        for path in (self.tmp, dev):
+            code, out, err = self.run_main(["dry", path, "--voice-id", "v1"])
+            self.assertEqual(code, 1, path)
+            self.assertEqual(out, "")
+
+    def test_unc_and_stream_paths_refused_before_filesystem(self):
+        def boom(*a, **k):
+            raise AssertionError("filesystem touched")
+        for bad in ("//127.0.0.1/x/s.md", "\\\\127.0.0.1\\x\\s.md", "//./NUL", self.tmp + "/s.md:x"):
+            with mock.patch.object(lv.os, "stat", boom), mock.patch.object(lv.os, "lstat", boom), \
+                    mock.patch.object(lv.os, "listdir", boom):
+                code, out, err = self.run_main(["dry", bad, "--voice-id", "v1"])
+                self.assertEqual(code, 2, bad)
+                code, out, err = self.run_main(["dry", "x.md", "--voice-id", "v1", "--out", bad])
+                self.assertEqual(code, 2, bad)
+
+    def test_dry_preview_is_capped(self):
+        p = self.script("".join("[a] line %d\n" % i for i in range(120)))
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", self.fresh_out()])
+        self.assertEqual(code, 0, err)
+        self.assertIn("requests: 120", out)
+        self.assertIn("050 [", out)
+        self.assertNotIn("051 [", out)
+        self.assertIn("70 more request(s) not shown", out)
+
+    def test_script_read_is_byte_capped(self):
+        p = self.script("[a] " + "x" * 100 + "\n")
+        with mock.patch.object(lv, "MAX_SCRIPT_BYTES", 50):
+            code, out, err = self.run_main(["dry", p, "--voice-id", "v1"])
+        self.assertEqual(code, 1)
+        self.assertIn("larger", err)
+
+    def test_out_existence_message_does_not_echo_path(self):
+        p = self.script("[a] hi\n")
+        secret = self.tmp + "/some_private_name.txt"
+        with open(secret, "w") as f:
+            f.write("x")
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out", secret])
+        self.assertEqual(code, 2)
+        self.assertNotIn("some_private_name", err + out)
+
+    # F5 / F6
+    def test_redact_cut_off_key(self):
+        text = " " * 50 + "X" + KEY[:9]
+        r = lv.redact(text, KEY)
+        self.assertNotIn(KEY[:6], r)
+        self.assertIn("[redacted]", r)
+        self.assertEqual(lv.redact("nothing here", KEY), "nothing here")
+
+    def test_key_straddling_error_read_limit_hidden(self):
+        body = (b" " * 1190) + b"X" + KEY.encode()
+        srv = self.serve({"status": 401, "ctype": "text/plain", "body": body})
+        code, out, err, o = self.send(srv)
+        self.assertEqual(code, 1)
+        self.assertNotIn(KEY[:6], out + err)
+
+    def test_key_in_other_arguments_refused_on_send(self):
+        srv = self.serve({})
+        p = self.script("[a] hi\n")
+        base = ["send", p, "--api-base", base_of(srv)]
+        cases = [base + ["--voice-id", KEY, "--out", self.fresh_out()],
+                 base + ["--voice-id", "v1", "--model", KEY, "--out", self.fresh_out()],
+                 base + ["--voice-id", "v1", "--out", self.tmp + "/" + KEY],
+                 base + ["--voice-id", "v1", "--tag", KEY, "--out", self.fresh_out()]]
+        for argv in cases:
+            code, out, err = self.run_main(argv, env={lv.KEY_ENV: KEY})
+            self.assertEqual(code, 2, argv)
+            self.assertNotIn(KEY, out + err)
+        self.assertEqual(srv.requests, [])
+
+    def test_key_shaped_argument_refused_without_echo(self):
+        for argv in (["dry", SKKEY, "--voice-id", "v1"], ["dry", "x.md", "--voice-id", SKKEY]):
+            code, out, err = self.run_main(argv)
+            self.assertEqual(code, 2)
+            self.assertNotIn(SKKEY, out + err)
+
+    # F7 / F8
+    def test_dangerous_tags_refused_fast(self):
+        p = self.script("a" * 41 + "\n")
+        for tag in ("(a+)+$", "(a|aa)+b", "a*a*a*a*b", "(a)\\1", "(?=a)b", "a{99999999999}",
+                    "[[:alpha:]]", "(?P<n>a)", "(.*)*"):
+            t0 = time.time()
+            code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--tag", tag])
+            self.assertEqual(code, 1, tag)
+            self.assertLess(time.time() - t0, 3, tag)
+            self.assertNotIn("Traceback", err)
+
+    def test_reasonable_tags_accepted(self):
+        for tag in (lv.DEFAULT_TAG, r"^NARR:", r"^\(\w+\)", r"^(?:A|B):", r"(?i)^\[x\]", r"^\w{1,10}:"):
+            lv.compile_tag(tag)
+
+    def test_tag_only_sees_window(self):
+        tag = lv.compile_tag(lv.DEFAULT_TAG)
+        long_line = "[" + "x" * 400 + "] hi"
+        self.assertEqual(lv.spoken_lines(long_line, "tagged", tag), [])
+
+    def test_tag_budget_enforced(self):
+        tag = lv.compile_tag(lv.DEFAULT_TAG)
+        with mock.patch.object(lv, "TAG_BUDGET", -1):
+            with self.assertRaises(lv.ToolError):
+                lv.spoken_lines("a\nb\n", "all", tag)
+
+    def test_locked_script_is_clean_error(self):
+        p = self.script("[a] hi\n")
+        with mock.patch.object(lv, "open", create=True, side_effect=PermissionError("locked")):
+            for mode in ("dry", "send"):
+                code, out, err = self.run_main([mode, p, "--voice-id", "v1"], env={lv.KEY_ENV: KEY})
+                self.assertEqual(code, 1)
+                self.assertIn("PermissionError", err)
+                self.assertNotIn("Traceback", err)
+
+    def test_unexpected_exception_has_no_traceback(self):
+        p = self.script("[a] hi\n")
+        with mock.patch.object(lv, "build_plan", side_effect=RuntimeError("secret detail")):
+            code, out, err = self.run_main(["dry", p, "--voice-id", "v1"])
+        self.assertEqual(code, 1)
+        self.assertIn("RuntimeError", err)
+        self.assertNotIn("secret detail", err)
+
+    # F9
+    def test_dry_out_cannot_forge_output(self):
+        p = self.script("[a] hi\n")
+        code, out, err = self.run_main(["dry", p, "--voice-id", "v1", "--out",
+                                        "x\ncharacters: 1\n\x1b[2J\u202eDRY RUN ok"])
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertNotIn("\x1b", err)
+
+    # F12
+    def test_unicode_line_breaks_split_lines(self):
+        for br in ("\u2028", "\u2029", "\x85", "\x0b", "\x0c"):
+            t = "[a] hello%s[b] world" % br
+            self.assertEqual(lv.spoken_lines(t, "auto", lv.compile_tag(lv.DEFAULT_TAG)),
+                             ["hello", "world"], repr(br))
+        self.assertEqual(lv.spoken_lines("one\x0btwo\x0cthree", "all", lv.compile_tag(lv.DEFAULT_TAG)),
+                         ["one", "two", "three"])
+
+    # F11
+    def test_total_deadline_per_request(self):
+        srv = self.serve({"cl": "1000", "drip": 8})
+        t0 = time.time()
+        with mock.patch.object(lv, "TOTAL_TIMEOUT", 1):
+            code, out, err, o = self.send(srv)
+        self.assertEqual(code, 1)
+        self.assertIn("total time limit", err)
+        self.assertLess(time.time() - t0, 2.5)
+
+    # F16
+    def test_http_exception_keeps_written_count(self):
+        srv = self.serve({})
+        real = lv.synthesize
+        calls = []
+
+        def flaky(*a, **k):
+            calls.append(1)
+            if len(calls) == 2:
+                raise lv.http.client.IncompleteRead(b"x")
+            return real(*a, **k)
+        with mock.patch.object(lv, "synthesize", flaky):
+            code, out, err, o = self.send(srv, TAGGED)
+        self.assertEqual(code, 1)
+        self.assertIn("1 file(s) were written", err)
+
+    # F18
+    def test_ci_pattern_catches_elevenlabs_key_shape(self):
+        with open(ROOT + "/.github/workflows/ci.yml", encoding="utf-8") as f:
+            m = re.search(r"PATTERN='([^']*)'", f.read())
+        self.assertTrue(m)
+        pat = re.compile(m.group(1))
+        self.assertTrue(pat.search("key = " + SKKEY))
+        self.assertTrue(pat.search("=" + "sk" + "_" + "0123456789abcdef0123"))
+        self.assertFalse(pat.search("sk" + "_" + "short"))
+        self.assertFalse(pat.search("the sk_ prefix is documented"))
+
+    # docs
+    def test_docs_do_not_overclaim(self):
+        texts = {}
+        for name in ("README.md", "README.ar.md", "skills/lahja-voice/SKILL.md"):
+            with open(ROOT + "/" + name, encoding="utf-8") as f:
+                texts[name] = f.read()
+        for name, t in texts.items():
+            self.assertNotIn("enforced even with", t, name)
+            self.assertNotIn("that host only", t, name)
+            self.assertNotIn("never spoken", t, name)
+        self.assertIn("127.0.0.1", texts["README.md"])
+        self.assertIn("127.0.0.1", texts["skills/lahja-voice/SKILL.md"])
+        self.assertIn("never made", texts["README.md"])
 
 
 if __name__ == "__main__":
