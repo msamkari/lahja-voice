@@ -867,13 +867,14 @@ class Fix011(Base):
     def test_unc_and_stream_paths_refused_before_filesystem(self):
         def boom(*a, **k):
             raise AssertionError("filesystem touched")
+        real = self.script("[a] hi\n")
         for bad in ("//127.0.0.1/x/s.md", "\\\\127.0.0.1\\x\\s.md", "//./NUL", self.tmp + "/s.md:x"):
             with mock.patch.object(lv.os, "stat", boom), mock.patch.object(lv.os, "lstat", boom), \
                     mock.patch.object(lv.os, "listdir", boom):
                 code, out, err = self.run_main(["dry", bad, "--voice-id", "v1"])
                 self.assertEqual(code, 2, bad)
-                code, out, err = self.run_main(["dry", "x.md", "--voice-id", "v1", "--out", bad])
-                self.assertEqual(code, 2, bad)
+            code, out, err = self.run_main(["dry", real, "--voice-id", "v1", "--out", bad])
+            self.assertEqual(code, 2, bad)
 
     def test_dry_preview_is_capped(self):
         p = self.script("".join("[a] line %d\n" % i for i in range(120)))
