@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.2 (2026-11-16)
+- Added the plugin icon (square 1024 px PNG, generated with Gemini and chosen by the author).
+
 ## 0.1.1
 Fixes from the second adversarial round (all with regression tests, local servers only).
 - A response is saved only if the received byte count equals `Content-Length` (or the chunked body ends cleanly); a truncated body is an error. A response with neither is refused. The audio must start with an ID3 tag or an MPEG frame sync, so HTML/JSON labelled `audio/mpeg` is refused.

@@ -708,7 +708,7 @@ class Cli(Base):
             d = json.load(f)
         self.assertEqual(d["name"], "lahja-voice")
         self.assertEqual(d["license"], "MIT")
-        self.assertEqual(d["version"], "0.1.1")
+        self.assertEqual(d["version"], "0.1.2")
 
     def _skill(self):
         with open(ROOT + "/skills/lahja-voice/SKILL.md", encoding="utf-8") as f:
