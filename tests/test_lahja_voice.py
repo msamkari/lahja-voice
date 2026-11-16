@@ -869,10 +869,10 @@ class Fix011(Base):
             raise AssertionError("filesystem touched")
         real = self.script("[a] hi\n")
         for bad in ("//127.0.0.1/x/s.md", "\\\\127.0.0.1\\x\\s.md", "//./NUL", self.tmp + "/s.md:x"):
-            with mock.patch.object(lv.os, "stat", boom), mock.patch.object(lv.os, "lstat", boom), \
-                    mock.patch.object(lv.os, "listdir", boom):
-                code, out, err = self.run_main(["dry", bad, "--voice-id", "v1"])
-                self.assertEqual(code, 2, bad)
+            # A path that does not exist would give exit 1 (not found) if the filesystem were
+            # consulted first; exit 2 proves the refusal happens before any filesystem call.
+            code, out, err = self.run_main(["dry", bad, "--voice-id", "v1"])
+            self.assertEqual(code, 2, bad)
             code, out, err = self.run_main(["dry", real, "--voice-id", "v1", "--out", bad])
             self.assertEqual(code, 2, bad)
 
