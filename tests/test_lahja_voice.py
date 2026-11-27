@@ -1046,7 +1046,8 @@ class Fix011(Base):
             self.assertNotIn("never spoken", t, name)
         self.assertIn("127.0.0.1", texts["README.md"])
         self.assertIn("127.0.0.1", texts["skills/lahja-voice/SKILL.md"])
-        self.assertIn("never made", texts["README.md"])
+        self.assertIn("with model `eleven_v4` only", texts["README.md"])
+        self.assertIn("Not tried against the real service", texts["README.md"])
 
 
 if __name__ == "__main__":
