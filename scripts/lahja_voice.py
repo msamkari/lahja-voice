@@ -24,7 +24,7 @@ import urllib.parse
 import urllib.request
 import warnings
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 KEY_ENV = "ELEVENLABS_API_KEY"
 DEFAULT_MODEL = "eleven_multilingual_v2"
 DEFAULT_MAX_CHARS = 5000

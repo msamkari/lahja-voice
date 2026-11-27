@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.3 (2026-11-27)
+- Docs only (plus the version number): the README and skill no longer say a real API call was never made. Real calls were tried with model `eleven_v4`: 1 line and 3 lines saved as mp3, HTTP 401 and 404 reported cleanly. Still not tried for real: the default model, splitting of lines over 2500 characters, quota and rate-limit errors. No change to behaviour or permissions.
+
 ## 0.1.2 (2026-11-16)
 - Added the plugin icon (square 1024 px PNG, generated with Gemini and chosen by the author).
 

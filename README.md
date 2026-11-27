@@ -44,7 +44,7 @@ In Claude Code the skill pre-approves only `dry`. It shows you the dry run and r
 
 ## Limits
 
-- A real API call was never made by the author. The request format follows the public API documentation (`POST /v1/text-to-speech/{voice_id}`, JSON `text` and `model_id`) and is unverified; a response without `Content-Length` that is not chunked is refused, which a real service might trigger.
+- Tried against the real service on 2026-11-27 with model `eleven_v4` only: one short line, then three short lines (all saved as mp3), plus an invalid key (HTTP 401) and an unknown voice id (HTTP 404). Not tried against the real service: the default model, splitting of lines over 2500 characters, quota and rate-limit errors (these ran against a local test server). A response without `Content-Length` that is not chunked is refused.
 - `dry` can show the first lines of any readable UTF-8 text file you point it at (at most 50 lines of 80 characters). Only point it at script files.
 - Not fixed: an existing junction/symlink as `--out` is followed; characters are counted by Python, and Python 3.8 knows an older Unicode version than newer Pythons.
 - Characters are counted as Python characters; ElevenLabs may count slightly differently.
